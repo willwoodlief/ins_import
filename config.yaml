@@ -1,0 +1,11 @@
+database_name: 'ins_import'
+database_user: 'ins_import'
+database_pw : 'y3qQ31T9zwKRTxdR'
+database_host: 'localhost'
+database_charset: 'utf8mb4'
+
+target_username: 'majeem@healthyhalo.com'
+target_password: 'Ravingfans123)('
+target_broker_id: '279853'
+target_corp_id: '1344'
+target_agent_id: '295751'

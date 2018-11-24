@@ -1,0 +1,7 @@
+{
+    "require": {
+        "symfony/yaml": "^3.4",
+        "czproject/git-php": "^3.14",
+        "neitanod/forceutf8": "^2.0"
+    }
+}
