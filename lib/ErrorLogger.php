@@ -379,7 +379,7 @@ class  ErrorLogger {
 		if (array_key_exists('REMOTE_ADDR',$_SERVER)) {
             $ret['caller_ip_address'] = $_SERVER['REMOTE_ADDR'] ? $_SERVER['REMOTE_ADDR'] : null;
         } else {
-            $_SERVER['REMOTE_ADDR'] = null;
+            $ret['caller_ip_address'] = null;
         }
 
 		return $ret;
