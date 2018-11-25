@@ -157,19 +157,21 @@ function get_raw_data($raw_id) {
 }
 
 function generate_unique_id($raw_data) {
-    $string = $raw_data['fname'] . ' ' . $raw_data['mname'] . ' ' . $raw_data['cubed_id'];
+    $string = $raw_data->fname . ' ' . $raw_data->mname . ' ' . $raw_data->cubed_id;
     return md5($string);
 }
 
 /**
  * @param array $data
  * @param integer $raw_id
+ * @return integer
  * @throws SQLException
  */
 function save_exported_data($data,$raw_id) {
     global $mydb;
     $data['raw_user_data_id'] = $raw_id;
-    $mydb->insert('exported_user_data',$data);
+    unset($data['UseInternalIDAsMemberID']); //this is not in the db
+    return $mydb->insert('exported_user_data',$data);
 }
 
 /**
@@ -190,7 +192,7 @@ function add_member_id($exported_data_id,$response) {
         throw new ExportException("Cannot find MEMBER  in the response: ". print_r($response));
     }
     $sql = "update exported_user_data SET member_id = ? WHERE id = ?;";
-    $mydb->execSQL($sql,['si',$member_id,$exported_data_id],'@sey@add_member_id');
+    $mydb->execSQL($sql,['si',$member_id,$exported_data_id],MYDB::LAST_ID,'@sey@add_member_id');
 }
 
 /**
@@ -210,9 +212,14 @@ function create_export_log($response,$http_code,$exported_data_row,$error_log_id
     if ($error_log_id) {
         $b_success = 0;
     }
-    if ($http_code == 400) {
+    if ($http_code >= 400) {
         $b_success = 0;
     }
+
+	if ($http_code == 0) {
+		$b_success = 0;
+	}
+
 
     $is_successful = check_for_response_success($response);
     if (!$is_successful) {
@@ -227,18 +234,19 @@ function create_export_log($response,$http_code,$exported_data_row,$error_log_id
 
     $export_log_id = $mydb->execSQL(
                 $sql,
-        MYDB::RESULT_SET,
-                [
-                  'iiiiss',
-                    $export_data_id,
-                    $error_log_id,
-                    $http_code,
-                    $b_success,
-                    $response,
-                    $notes
+			    [
+				    'iiiiss',
+				    $export_data_id,
+				    $error_log_id,
+				    $http_code,
+				    $b_success,
+				    $response,
+				    $notes
 
 
-                ],
+			    ],
+        MYDB::LAST_ID,
+
                 '@sey@create_export_log:insert_export_log'
         );
     return $export_log_id;
@@ -295,16 +303,18 @@ function do_one_export($raw_id) {
 
     // do the request
     try {
+	    $http_code = 0;
         $error_log_id = null;
         $response = null;
         $response = insert_member($exported_data,$http_code);
         $b_good_call = check_for_response_success($response) ;
         if ($b_good_call) {
-            add_member_id($response,$exported_data_row->id);
+            add_member_id($exported_data_row->id,$response );
         }
 
     } catch (Exception $e) {
-        $error_log_id = ErrorLogger::saveException($e);
+        $error_log_info = ErrorLogger::saveException($e);
+	    $error_log_id = $error_log_info['id'];
     }
 
 
@@ -317,12 +327,12 @@ function do_one_export($raw_id) {
 }
 
 function convert_export_to_to_call_data($data) {
-    $ret = $data;
-    unset($ret['id']);
-    unset($ret['raw_user_data_id']);
-    unset($ret['created_at']);
-    unset($ret['updated_at']);
-    unset($ret['member_id']);
+    $ret = clone $data;
+    unset($ret->id);
+    unset($ret->raw_user_data_id);
+    unset($ret->created_at);
+    unset($ret->updated_at);
+    unset($ret->member_id);
     return $ret;
 }
 
@@ -339,7 +349,7 @@ function build_export_data($raw_object,$unique_id) {
     $ret['UniqueID'] = $unique_id;
     $ret['UseInternalIDAsMemberID'] = 'N';
     $ret['source'] = 'AgentCubed';
-    $ret['sourcedetail'] = "Agent Cubed Id: " . $raw_object->cubed_id;
+
 
     $raws = get_object_vars($raw_object);
     if (!$raws) {
@@ -350,30 +360,42 @@ function build_export_data($raw_object,$unique_id) {
      * cubed_id,member_id,Corpid,Agent,UniqueID,source,sourcedetail
      * Firstname,Middlename,Lastname,Gender,DOB,email,Phone1,Phone2,ADDRESS1,ADDRESS2,CITY,STATE,ZIPCODE,
      */
-    foreach ($raws as $raw) {
-        if (empty($raw_object->$raw) || empty(trim($raw_object->$raw))) {
+    foreach ($raws as $prop => $raw) {
+        if (empty($raw) || empty(trim($raw))) {
             continue;
         }
-        switch ($raw) {
+        switch ($prop) {
+	        case 'id': {
+	        	//do not process the automatic id pk
+	        	break;
+	        }
+	        case 'record_count': {
+	        	//do not process record count
+	        	break;
+	        }
+	        case 'cubed_id' : {
+		        $ret['sourcedetail'] = "Agent Cubed Id: " . $raw;
+		        break;
+	        }
             case 'fname': {
-                $ret['Firstname'] = $raw_object->$raw;
+                $ret['Firstname'] = $raw;
                 break;
             }
             case 'mname':{
-                $ret['Middlename'] = $raw_object->$raw;
+                $ret['Middlename'] = $raw;
                 break;
             }
             case 'lname':{
-                $ret['Lastname'] = $raw_object->$raw;
+                $ret['Lastname'] = $raw;
                 break;
             }
             case 'gender':{
-                $ret['Gender'] = $raw_object->$raw;
+                $ret['Gender'] = $raw;
                 break;
             }
             case 'dob':{
                 //same format (MM/DD/YY)
-                $ret['DOB'] = $raw_object->$raw;
+                $ret['DOB'] = $raw;
                 break;
             }
             case 'age':{
@@ -381,7 +403,7 @@ function build_export_data($raw_object,$unique_id) {
                 break;
             }
             case 'email':{
-                $ret['Email'] = $raw_object->$raw;
+                $ret['Email'] = $raw;
                 break;
             }
             case 'spouse_dob':{
@@ -389,7 +411,7 @@ function build_export_data($raw_object,$unique_id) {
                 break;
             }
             case 'lead_phone':{
-                $ret['Phone1'] = preg_replace("/[^0-9]/", "",$raw_object->$raw);
+                $ret['Phone1'] = preg_replace("/[^0-9]/", "",$raw);
                 break;
             }
             case 'lead_phone_ext':{
@@ -401,7 +423,7 @@ function build_export_data($raw_object,$unique_id) {
                 break;
             }
             case 'secondary_phone':{
-                $ret['Phone2'] = preg_replace("/[^0-9]/", "",$raw_object->$raw);
+                $ret['Phone2'] = preg_replace("/[^0-9]/", "",$raw);
                 break;
             }
             case 'secondary_phone_ext':{
@@ -413,23 +435,23 @@ function build_export_data($raw_object,$unique_id) {
                 break;
             }
             case 'address1':{
-                $ret['ADDRESS1'] = $raw_object->$raw;
+                $ret['ADDRESS1'] = $raw;
                 break;
             }
             case 'address2':{
-                $ret['ADDRESS2'] = $raw_object->$raw;
+                $ret['ADDRESS2'] = $raw;
                 break;
             }
             case 'city':{
-                $ret['CITY'] = $raw_object->$raw;
+                $ret['CITY'] = $raw;
                 break;
             }
             case 'state':{
-                $ret['STATE'] = $raw_object->$raw;
+                $ret['STATE'] = $raw;
                 break;
             }
             case 'postal':{
-                $ret['ZIPCODE'] = $raw_object->$raw;
+                $ret['ZIPCODE'] = $raw;
                 break;
             }
             case 'lead_created_by':{

@@ -167,7 +167,7 @@ class JsonHelper {
 
         }
 
-        if (is_array($what)) {
+        if (is_array($what) || is_object($what)) {
             return self::toString($what);
         } else {
             return strval($what);
