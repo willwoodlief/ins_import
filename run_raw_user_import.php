@@ -31,7 +31,7 @@ try {
             left join exported_user_data d ON d.raw_user_data_id = r.id
             left join export_log e ON e.exported_data_id = d.id
             left join export_log e2 ON e2.exported_data_id = d.id AND e2.is_success > 0
-            WHERE (e.id IS NULL) OR (e2.id IS NULL) and r.id between $start and $end;";
+            WHERE ((e.id IS NULL) OR (e2.id IS NULL)) and (r.id between $start and $end);";
 
     $res = $mydb->execSQL($sql, null, MYDB::RESULT_SET);
     $count = $res[0]->c;
@@ -40,7 +40,7 @@ try {
             left join exported_user_data d ON d.raw_user_data_id = r.id
             left join export_log e ON e.exported_data_id = d.id
             left join export_log e2 ON e2.exported_data_id = d.id AND e2.is_success > 0
-            WHERE (e.id IS NULL) OR (e2.id IS NULL) and r.id between $start and $end
+            WHERE ((e.id IS NULL) OR (e2.id IS NULL)) and (r.id between $start and $end)
             limit ?,100
             ;";
     $total_count = 0;
