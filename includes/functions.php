@@ -61,6 +61,45 @@ function update_member($member_id,$data,&$http_code) {
 }
 
 /**
+ * @param $member_id
+ * @param $data
+ * @param $http_code
+ * @return array
+ * @throws CurlHelperException
+ */
+function update_member_with_api($member_id,$data,&$http_code) {
+	$curl = new CurlHelper();
+	//$curl->b_debug = true;
+	//$basic_auth = 'Basic bWFqZWVtQGhlYWx0aHloYWxvLmNvbTpSYXZpbmdmYW5zMTIzKSg=';
+	$user = TARGET_USERNAME;
+	$password = TARGET_PASSWORD;
+	$headers = [
+		'Authorization: Basic '. base64_encode("$user:$password"),
+		'Content-Type: application/x-www-form-urlencoded'
+	];
+
+	$required = [
+		'CORP_ID' => TARGET_CORP_ID ,
+		'AGENT_ID' => TARGET_AGENT_ID,
+		'UNIQUE_ID' => $member_id,
+	];
+
+
+
+	//make into form post string
+	$payload = array_merge($required,$data);
+	$hkeys = [];
+	foreach ($payload as $key => $value) {
+		$hkeys[] = "$key=$value";
+	}
+	//$payload_json = JsonHelper::toStringAgnostic($payload);
+	$payload_string = implode('&',$hkeys);
+	$url = "https://www.enrollment123.com/gateway/member.cfm";
+	$response = $curl->curl_helper($url,$http_code,$payload_string,true,'json',false,false,$headers);
+	return $response;
+}
+
+/**
  * @param $data
  * @param integer $http_code
  * @return array|int|string|null
@@ -178,6 +217,7 @@ function save_exported_data($data,$raw_id) {
  * @param $exported_data_id
  * @param $response
  * @throws SQLException
+ * @return string
  * @throws ExportException
  */
 function add_member_id($exported_data_id,$response) {
@@ -193,8 +233,54 @@ function add_member_id($exported_data_id,$response) {
     }
     $sql = "update exported_user_data SET member_id = ? WHERE id = ?;";
     $mydb->execSQL($sql,['si',$member_id,$exported_data_id],MYDB::LAST_ID,'@sey@add_member_id');
+	return $member_id;
 }
 
+
+/**
+ * creates the api log after getting success and error message from response
+ * returns the api log id
+ * @param $export_log_id
+ * @param $http_code
+ * @param $response
+ * @param $error_log_id
+ * @return integer
+ * @throws SQLException
+ */
+function create_api_log($export_log_id,$http_code,$response,$error_log_id) {
+	global $mydb;
+
+
+	$error_message = null;
+	$response_success = check_for_extra_response_success($response,$http_code,$error_message);
+	if ($response_success) {
+		$response_success = 1;
+	} else {
+		$response_success = 0;
+	}
+
+
+	$sql = "insert into 
+              api_update_log(export_log_id,is_success,http_code,error_message,response,error_log_id)
+            VALUES (?,?,?,?,?,?);";
+
+	$api_log_id = $mydb->execSQL(
+		$sql,
+		[
+			'iiissi',
+			$export_log_id,
+			$response_success,
+			$http_code,
+			$error_message,
+			$response,
+			$error_log_id
+		],
+		MYDB::LAST_ID,
+
+		'@sey@create_export_log:create_api_log'
+	);
+	return $api_log_id;
+}
 /**
  * @param $response
  * @param $http_code
@@ -204,7 +290,8 @@ function add_member_id($exported_data_id,$response) {
  * @return integer
  * @throws SQLException
  */
-function create_export_log($response,$http_code,$exported_data_row,$error_log_id,$notes=null) {
+function create_export_log($response,$http_code,$exported_data_row,$error_log_id, $notes=null) {
+
     global $mydb;
     //determine if success or not
     $b_success = 1;
@@ -225,6 +312,7 @@ function create_export_log($response,$http_code,$exported_data_row,$error_log_id
     if (!$is_successful) {
         $b_success = 0;
     }
+
 
     $export_data_id = $exported_data_row->id;
 
@@ -251,6 +339,54 @@ function create_export_log($response,$http_code,$exported_data_row,$error_log_id
         );
     return $export_log_id;
 
+}
+
+/**
+ * return true, and sets error message to null, if success
+ * returns false and puts error message if fail
+ * @param $response
+ * @param $http_code
+ * @param $error_message
+ * @return bool
+ */
+function check_for_extra_response_success($response,$http_code,&$error_message) {
+	$b_success = true;
+	$error_message = null;
+	if (empty($response)) {
+		$b_success = false;
+		$error_message = "empty response";
+		return $b_success;
+	}
+
+	if ($http_code >= 400) {
+		$b_success = false;
+		$error_message = "http code >= 400";
+	}
+	// 1|674266968|||  ok
+	// 0|CORP ID not found
+
+	if (is_string($response)) {
+		$whats = explode('|',$response);
+		if (count($whats) < 2) {
+			$b_success = false;
+			$error_message = "could not parse the response of:$response ";
+		} else {
+			$con = intval($whats[0]);
+			if (!$con) {
+				$b_success = false;
+				$error_message = $whats[1];
+			}
+		}
+	}
+	else {
+		if ($b_success) {
+			$error_message = "response is not a string";
+			$b_success = false;
+		}
+
+	}
+
+	return $b_success;
 }
 
 function check_for_response_success($response) {
@@ -303,14 +439,29 @@ function do_one_export($raw_id) {
 
     // do the request
     try {
+	    $member_id = null;
 	    $http_code = 0;
+	    $extra_http_code = 0;
         $error_log_id = null;
         $response = null;
+	    $extra_response = null;
+	    $extra_error_log_id = null;
+
         $response = insert_member($exported_data,$http_code);
         $b_good_call = check_for_response_success($response) ;
         if ($b_good_call) {
-            add_member_id($exported_data_row->id,$response );
+            $member_id = add_member_id($exported_data_row->id,$response );
         }
+		print "m-$member_id\n";
+        if ($member_id) {
+        	try {
+		        $extra_response = add_extra_data( $member_id, $exported_data, $extra_http_code );
+	        } catch (Exception $f) {
+		        $error_log_info = ErrorLogger::saveException($f);
+		        $extra_error_log_id = $error_log_info['id'];
+	        }
+        }
+
 
     } catch (Exception $e) {
         $error_log_info = ErrorLogger::saveException($e);
@@ -320,10 +471,43 @@ function do_one_export($raw_id) {
 
     //make the export log
     $export_log_id = create_export_log($response,$http_code,$exported_data_row,$error_log_id);
+    create_api_log($export_log_id,$extra_http_code,$extra_response,$extra_error_log_id);
     return $export_log_id;
 
 
 
+}
+
+
+function extract_extra_data($exported_data) {
+	if (is_object($exported_data)) {
+		$exported_data = (array) $exported_data;
+	}
+	$payload = [];
+	$keys_to_check = ['DONOTCALL','EMAILOPTOUT','NOTE'];
+	foreach ($keys_to_check as $index => $key) {
+		if (!array_key_exists($key,$exported_data)) {
+			//throw new ExportException("Extra data key [$key] not in $exported_data");
+			continue;
+		}
+		if (empty($exported_data[$key])) {continue;}
+		$payload[$key] = $exported_data[$key];
+	}
+	return $payload;
+}
+
+/**
+ * @param $member_id
+ * @param $exported_data
+ * @param integer $http_code
+ * @return array|null
+ * @throws CurlHelperException
+ */
+function add_extra_data($member_id,$exported_data,&$http_code) {
+
+	$payload = extract_extra_data($exported_data);
+	if (empty($payload)) {return null;}
+	return update_member_with_api($member_id,$payload,$http_code);
 }
 
 function convert_export_to_to_call_data($data) {
@@ -459,11 +643,15 @@ function build_export_data($raw_object,$unique_id) {
                 break;
             }
             case 'do_not_call':{
-                //no way to make note right now
+	            if ($raw == 'True') {
+		            $ret['DONOTCALL'] = 'Y';
+	            }
                 break;
             }
             case 'do_not_email':{
-                //no way to make note right now
+            	if ($raw == 'True') {
+		            $ret['EMAILOPTOUT'] = 'Y';
+	            }
                 break;
             }
             case 'do_not_mail':{
@@ -494,6 +682,10 @@ function build_export_data($raw_object,$unique_id) {
     if (!array_key_exists('Lastname',$ret)) {
         $ret['Lastname'] = 'unknown';
     }
+
+	if (!array_key_exists('NOTE',$ret)) {
+		$ret['NOTE'] = 'Customer Imported from AgentCubed';
+	}
     return $ret;
 
 }

@@ -42,7 +42,8 @@ try {
 
 
 } catch (ParseException $exception) {
-    ErrorLogger::saveException($exception);
+	$info = ErrorLogger::getExceptionInfo( $exception );
+	die( "<pre>\n" . print_r($info,true) . "/n</pre>\n");
 }
 catch (Exception $e) {
     ErrorLogger::saveException($e);
