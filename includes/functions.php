@@ -689,3 +689,13 @@ function build_export_data($raw_object,$unique_id) {
     return $ret;
 
 }
+
+function udate($format = 'u', $utimestamp = null) {
+	if (is_null($utimestamp))
+		$utimestamp = microtime(true);
+
+	$timestamp = floor($utimestamp);
+	$milliseconds = round(($utimestamp - $timestamp) * 1000000);
+
+	return date(preg_replace('`(?<!\\\\)u`', $milliseconds, $format), $timestamp);
+}

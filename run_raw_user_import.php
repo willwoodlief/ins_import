@@ -86,7 +86,8 @@ try {
             $id = $row->id;
             $export_log_id = do_one_export($id);
 
-            print "batch $i, sub batch $sub_count, total $total_count --> Export Log ID is $export_log_id, raw is $id \n";
+            $ts = udate('Y-m-d H:i:s.u T');
+            print "$ts]] batch $i, sub batch $sub_count, total $total_count --> Export Log ID is $export_log_id, raw is $id \n";
 	        $sub_count ++;
             $total_count++;
             if ($limit) {
